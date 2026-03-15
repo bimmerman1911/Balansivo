@@ -57,9 +57,21 @@ def init_db():
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS balance_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                person_id INTEGER NOT NULL,
+                delta_cents INTEGER NOT NULL,
+                source_page TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_users_public_uuid ON users(public_uuid);
             CREATE INDEX IF NOT EXISTS idx_users_private_uuid ON users(private_uuid);
             CREATE INDEX IF NOT EXISTS idx_people_user_id ON people(user_id);
+            CREATE INDEX IF NOT EXISTS idx_balance_log_user_id_created_at ON balance_log(user_id, created_at DESC, id DESC);
             """
         )
 
@@ -184,6 +196,61 @@ def get_person_for_public(public_uuid: str, person_id: int):
             """,
             (public_uuid, person_id),
         ).fetchone()
+
+
+def get_balance_log_for_user(user_id: int, limit: int = 10):
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT
+                bl.person_id,
+                bl.delta_cents,
+                bl.source_page,
+                bl.created_at,
+                p.first_name,
+                p.last_name
+            FROM balance_log bl
+            JOIN people p ON p.id = bl.person_id
+            WHERE bl.user_id = ?
+            ORDER BY bl.created_at DESC, bl.id DESC
+            LIMIT ?
+            """,
+            (user_id, limit),
+        ).fetchall()
+
+
+def record_balance_log(user_id: int, person_id: int, delta_cents: int, source_page: str):
+    created_at = now_iso()
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO balance_log (user_id, person_id, delta_cents, source_page, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (user_id, person_id, delta_cents, source_page, created_at),
+        )
+        conn.execute(
+            """
+            DELETE FROM balance_log
+            WHERE user_id = ?
+              AND id NOT IN (
+                SELECT id
+                FROM balance_log
+                WHERE user_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT 10
+              )
+            """,
+            (user_id, user_id),
+        )
+
+
+def format_timestamp(raw_value: str) -> str:
+    try:
+        dt = datetime.fromisoformat((raw_value or "").replace("Z", "+00:00"))
+        return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+    except ValueError:
+        return raw_value or "-"
 
 
 def render_template_string(template: str, **context):
@@ -503,6 +570,37 @@ BASE_HTML = """
     .metric.negative { color: #ffd7d7; }
     .metric.zero { color: #fff7cc; }
     .tiny { font-size: 0.84rem; color: var(--muted); }
+    .log-list {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .log-item {
+      display: grid;
+      gap: 6px;
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.04);
+    }
+    .log-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .source-pill {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.78rem;
+      border: 1px solid rgba(255,255,255,0.16);
+      color: var(--muted);
+    }
     .uuid {
       word-break: break-all;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -824,6 +922,7 @@ async def private_dashboard(private_uuid: str, request: Request):
     public_link = request_origin(request) + f"/{user['public_uuid']}"
     private_link = request_origin(request) + f"/{user['private_uuid']}"
     qr_uri = qr_data_uri(user)
+    balance_log = get_balance_log_for_user(user["id"])
 
     body = render_template_string(
         """
@@ -983,10 +1082,35 @@ async def private_dashboard(private_uuid: str, request: Request):
             <div class="message info">No people added yet. Add your first person above.</div>
           {% endif %}
         </div>
+
+        <div class="card stack-lg" style="margin-top:18px;">
+          <div>
+            <h2>Balance log (last 10 transactions)</h2>
+            <p class="muted">Shows where each transaction was made and when.</p>
+          </div>
+          {% if balance_log %}
+            <ul class="log-list">
+              {% for entry in balance_log %}
+                <li class="log-item">
+                  <div class="log-head">
+                    <strong>{{ entry['first_name'] }} {{ entry['last_name'] }}</strong>
+                    <span class="source-pill">{{ 'Private page' if entry['source_page'] == 'private' else 'Public page' }}</span>
+                  </div>
+                  <div class="metric {% if entry['delta_cents'] > 0 %}positive{% else %}negative{% endif %}">{{ '+' if entry['delta_cents'] > 0 else '-' }}{{ format_currency(entry['delta_cents']|abs) }}</div>
+                  <div class="tiny">{{ format_timestamp(entry['created_at']) }}</div>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <div class="message info">No transactions logged yet.</div>
+          {% endif %}
+        </div>
         """,
         user=user,
         people=people,
+        balance_log=balance_log,
         format_currency=format_currency,
+        format_timestamp=format_timestamp,
         initials=initials,
         qr_uri=qr_uri,
         public_link=public_link,
@@ -1052,6 +1176,7 @@ async def adjust_person_private(private_uuid: str, person_id: int, request: Requ
             "UPDATE people SET balance_cents = balance_cents + ? WHERE id = ?",
             (delta, person_id),
         )
+    record_balance_log(user["id"], person_id, delta, "private")
 
     return RedirectResponse(f"/private/{user['private_uuid']}", status_code=303)
 
@@ -1109,10 +1234,13 @@ async def adjust_people_bulk_private(private_uuid: str, request: Request):
         allowed_ids = {row["id"] for row in rows}
 
         delta = amount_cents if action == "add" else -amount_cents
+        updates = [(delta, person_id) for person_id in selected_ids if person_id in allowed_ids]
         conn.executemany(
             "UPDATE people SET balance_cents = balance_cents + ? WHERE id = ?",
-            [(delta, person_id) for person_id in selected_ids if person_id in allowed_ids],
+            updates,
         )
+    for _, current_person_id in updates:
+        record_balance_log(user["id"], current_person_id, delta, "private")
 
     return RedirectResponse(f"/private/{user['private_uuid']}", status_code=303)
 
@@ -1224,6 +1352,7 @@ async def public_person(public_uuid: str, person_id: int):
         return not_found_page()
 
     qr_uri = qr_data_uri(person)
+    balance_log = get_balance_log_for_user(user["id"])
 
     body = render_template_string(
         """
@@ -1277,13 +1406,38 @@ async def public_person(public_uuid: str, person_id: int):
             </div>
           </div>
         </div>
+
+        <div class="card stack-lg" style="margin-top:18px;">
+          <div>
+            <h2>Balance log (last 10 transactions)</h2>
+            <p class="muted">Recent transactions from both public and private pages.</p>
+          </div>
+          {% if balance_log %}
+            <ul class="log-list">
+              {% for entry in balance_log %}
+                <li class="log-item">
+                  <div class="log-head">
+                    <strong>{{ entry['first_name'] }} {{ entry['last_name'] }}</strong>
+                    <span class="source-pill">{{ 'Private page' if entry['source_page'] == 'private' else 'Public page' }}</span>
+                  </div>
+                  <div class="metric {% if entry['delta_cents'] > 0 %}positive{% else %}negative{% endif %}">{{ '+' if entry['delta_cents'] > 0 else '-' }}{{ format_currency(entry['delta_cents']|abs) }}</div>
+                  <div class="tiny">{{ format_timestamp(entry['created_at']) }}</div>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <div class="message info">No transactions logged yet.</div>
+          {% endif %}
+        </div>
         """,
         user=user,
         person=person,
         qr_uri=qr_uri,
+        balance_log=balance_log,
         initials=initials,
         masked_name=masked_name,
         format_currency=format_currency,
+        format_timestamp=format_timestamp,
     )
     return render_page("Public person page", body)
 
@@ -1315,6 +1469,7 @@ async def adjust_person_public(public_uuid: str, person_id: int, request: Reques
             "UPDATE people SET balance_cents = balance_cents + ? WHERE id = ?",
             (delta, person_id),
         )
+    record_balance_log(user["id"], person_id, delta, "public")
 
     return RedirectResponse(f"/public/{user['public_uuid']}/people/{person_id}", status_code=303)
 
