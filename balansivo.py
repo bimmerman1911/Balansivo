@@ -1099,7 +1099,7 @@ def render_message_page(title: str, message: str, back_href: str, is_error: bool
 
 if __name__ == "__main__":
     init_db()
-    host = os.environ.get("APP_HOST", "localhost")
+    host = os.environ.get("APP_HOST", "0.0.0.0")
     port = int(os.environ.get("APP_PORT", "8000"))
     debug = os.environ.get("APP_DEBUG", "").strip() == "1"
     print(f"Starting UUID Balance App on http://{host}:{port}")
