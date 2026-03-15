@@ -51,7 +51,7 @@ pip install flask
 Start the server:
 
 ```bash
-python uuid_balance_app.py
+python balansivo.py
 ```
 
 By default, the app runs on:
