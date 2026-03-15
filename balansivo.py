@@ -5,13 +5,16 @@ import sqlite3
 import uuid
 from datetime import datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from functools import wraps
+from jinja2 import Template
 
 try:
-    from flask import Flask, abort, redirect, render_template_string, request, url_for
+    import uvicorn
+    from fastapi import FastAPI, Request
+    from fastapi.responses import HTMLResponse, RedirectResponse
+    from starlette.exceptions import HTTPException as StarletteHTTPException
 except ModuleNotFoundError as exc:
     raise SystemExit(
-        "This app requires Flask. Install it with: pip install flask"
+        "This app requires FastAPI + Uvicorn. Install with: pip install fastapi uvicorn jinja2 python-multipart"
     ) from exc
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -19,8 +22,7 @@ DB_PATH = os.path.join(BASE_DIR, "uuid_balance_app.db")
 MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 ALLOWED_MIME = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 
-app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
+app = FastAPI()
 
 
 def get_conn():
@@ -168,24 +170,12 @@ def get_person_for_public(public_uuid: str, person_id: int):
         ).fetchone()
 
 
-def require_private_user(view_func):
-    @wraps(view_func)
-    def wrapper(private_uuid, *args, **kwargs):
-        user = get_user_by_private_uuid(private_uuid)
-        if not user:
-            abort(404)
-        return view_func(user, *args, **kwargs)
-    return wrapper
+def render_template_string(template: str, **context):
+    return Template(template).render(**context)
 
 
-def require_public_user(view_func):
-    @wraps(view_func)
-    def wrapper(public_uuid, *args, **kwargs):
-        user = get_user_by_public_uuid(public_uuid)
-        if not user:
-            abort(404)
-        return view_func(user, *args, **kwargs)
-    return wrapper
+def request_origin(request: Request) -> str:
+    return f"{request.url.scheme}://{request.url.netloc}"
 
 
 BASE_HTML = """
@@ -596,12 +586,11 @@ BASE_HTML = """
 """
 
 
-def render_page(title: str, body: str):
-    return render_template_string(BASE_HTML, title=title, body=body)
+def render_page(title: str, body: str, status_code: int = 200):
+    return HTMLResponse(render_template_string(BASE_HTML, title=title, body=body), status_code=status_code)
 
 
-@app.errorhandler(404)
-def not_found(_):
+def not_found_page():
     body = """
     <section class="hero">
       <span class="badge">Not found</span>
@@ -612,11 +601,10 @@ def not_found(_):
       <a class="button" href="/">Back to start</a>
     </div>
     """
-    return render_page("Not found", body), 404
+    return render_page("Not found", body, status_code=404)
 
 
-@app.errorhandler(413)
-def too_large(_):
+def too_large_page():
     body = """
     <section class="hero">
       <span class="badge">Upload too large</span>
@@ -627,11 +615,17 @@ def too_large(_):
       <a class="button" href="/">Back to start</a>
     </div>
     """
-    return render_page("Upload too large", body), 413
+    return render_page("Upload too large", body, status_code=413)
 
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(_request: Request, exc: StarletteHTTPException):
+    if exc.status_code == 404:
+        return not_found_page()
+    return HTMLResponse(str(exc.detail), status_code=exc.status_code)
 
 @app.get("/")
-def home():
+async def home():
     body = """
     <section class="hero">
       <h1>Track balances with UUID-only access.</h1>
@@ -697,15 +691,16 @@ def home():
 
 
 @app.post("/open")
-def open_uuid():
-    token = (request.form.get("uuid") or "").strip()
+async def open_uuid(request: Request):
+    form = await request.form()
+    token = (form.get("uuid") or "").strip()
     if not token:
-        return redirect(url_for("home"))
-    return redirect(f"/{token}")
+        return RedirectResponse("/", status_code=303)
+    return RedirectResponse(f"/{token}", status_code=303)
 
 
 @app.post("/create-user")
-def create_user():
+async def create_user(request: Request):
     public_uuid = str(uuid.uuid4())
     private_uuid = str(uuid.uuid4())
 
@@ -715,8 +710,8 @@ def create_user():
             (public_uuid, private_uuid, now_iso()),
         )
 
-    private_link = request.host_url.rstrip("/") + f"/{private_uuid}"
-    public_link = request.host_url.rstrip("/") + f"/{public_uuid}"
+    private_link = request_origin(request) + f"/{private_uuid}"
+    public_link = request_origin(request) + f"/{public_uuid}"
 
     body = """
     <section class="hero">
@@ -756,7 +751,7 @@ def create_user():
       </div>
     </div>
     """
-    return render_template_string(BASE_HTML, title="User created", body=render_template_string(
+    return render_page("User created", render_template_string(
         body,
         private_uuid=private_uuid,
         public_uuid=public_uuid,
@@ -765,22 +760,24 @@ def create_user():
     ))
 
 
-@app.get("/<token>")
-def route_by_uuid(token):
+@app.get("/{token}")
+async def route_by_uuid(token: str):
     user = get_user_by_any_uuid(token)
     if not user:
-        abort(404)
+        return not_found_page()
     if user["token_type"] == "private":
-        return redirect(url_for("private_dashboard", private_uuid=token))
-    return redirect(url_for("public_profile", public_uuid=token))
+        return RedirectResponse(f"/private/{token}", status_code=303)
+    return RedirectResponse(f"/public/{token}", status_code=303)
 
 
-@app.get("/private/<private_uuid>")
-@require_private_user
-def private_dashboard(user):
+@app.get("/private/{private_uuid}")
+async def private_dashboard(private_uuid: str, request: Request):
+    user = get_user_by_private_uuid(private_uuid)
+    if not user:
+        return not_found_page()
     people = get_people_for_user(user["id"])
-    public_link = request.host_url.rstrip("/") + f"/{user['public_uuid']}"
-    private_link = request.host_url.rstrip("/") + f"/{user['private_uuid']}"
+    public_link = request_origin(request) + f"/{user['public_uuid']}"
+    private_link = request_origin(request) + f"/{user['private_uuid']}"
     qr_uri = qr_data_uri(user)
 
     body = render_template_string(
@@ -919,11 +916,15 @@ def private_dashboard(user):
     return render_page("Private dashboard", body)
 
 
-@app.post("/private/<private_uuid>/people")
-@require_private_user
-def add_person(user):
-    first_name = (request.form.get("first_name") or "").strip()
-    last_name = (request.form.get("last_name") or "").strip()
+@app.post("/private/{private_uuid}/people")
+async def add_person(private_uuid: str, request: Request):
+    user = get_user_by_private_uuid(private_uuid)
+    if not user:
+        return not_found_page()
+
+    form = await request.form()
+    first_name = (form.get("first_name") or "").strip()
+    last_name = (form.get("last_name") or "").strip()
 
     if not first_name or not last_name:
         return render_message_page(
@@ -942,19 +943,22 @@ def add_person(user):
             (user["id"], first_name, last_name, now_iso()),
         )
 
-    return redirect(url_for("private_dashboard", private_uuid=user["private_uuid"]))
+    return RedirectResponse(f"/private/{user['private_uuid']}", status_code=303)
 
 
-@app.post("/private/<private_uuid>/people/<int:person_id>/adjust")
-@require_private_user
-def adjust_person_private(user, person_id):
+@app.post("/private/{private_uuid}/people/{person_id}/adjust")
+async def adjust_person_private(private_uuid: str, person_id: int, request: Request):
+    user = get_user_by_private_uuid(private_uuid)
+    if not user:
+        return not_found_page()
     person = get_person_for_private(user["private_uuid"], person_id)
     if not person:
-        abort(404)
+        return not_found_page()
 
-    action = (request.form.get("action") or "").strip().lower()
+    form = await request.form()
+    action = (form.get("action") or "").strip().lower()
     try:
-        amount_cents = parse_amount_to_cents(request.form.get("amount"))
+        amount_cents = parse_amount_to_cents(form.get("amount"))
     except ValueError as exc:
         return render_message_page(
             "Invalid amount",
@@ -970,13 +974,17 @@ def adjust_person_private(user, person_id):
             (delta, person_id),
         )
 
-    return redirect(url_for("private_dashboard", private_uuid=user["private_uuid"]))
+    return RedirectResponse(f"/private/{user['private_uuid']}", status_code=303)
 
 
-@app.post("/private/<private_uuid>/upload-swish")
-@require_private_user
-def upload_swish(user):
-    file = request.files.get("qr_image")
+@app.post("/private/{private_uuid}/upload-swish")
+async def upload_swish(private_uuid: str, request: Request):
+    user = get_user_by_private_uuid(private_uuid)
+    if not user:
+        return not_found_page()
+
+    form = await request.form()
+    file = form.get("qr_image")
     if not file or not file.filename:
         return render_message_page(
             "No image selected",
@@ -985,7 +993,7 @@ def upload_swish(user):
             is_error=True,
         )
 
-    mime = (file.mimetype or "").lower()
+    mime = (getattr(file, "content_type", "") or "").lower()
     if mime not in ALLOWED_MIME:
         return render_message_page(
             "Unsupported image",
@@ -994,7 +1002,9 @@ def upload_swish(user):
             is_error=True,
         )
 
-    payload = file.read()
+    payload = await file.read()
+    if len(payload) > MAX_UPLOAD_BYTES:
+        return too_large_page()
     if not payload:
         return render_message_page(
             "Empty image",
@@ -1009,12 +1019,14 @@ def upload_swish(user):
             (payload, mime, user["id"]),
         )
 
-    return redirect(url_for("private_dashboard", private_uuid=user["private_uuid"]))
+    return RedirectResponse(f"/private/{user['private_uuid']}", status_code=303)
 
 
-@app.get("/public/<public_uuid>")
-@require_public_user
-def public_profile(user):
+@app.get("/public/{public_uuid}")
+async def public_profile(public_uuid: str):
+    user = get_user_by_public_uuid(public_uuid)
+    if not user:
+        return not_found_page()
     people = get_people_for_user(user["id"])
 
     body = render_template_string(
@@ -1061,12 +1073,14 @@ def public_profile(user):
     return render_page("Public profile", body)
 
 
-@app.get("/public/<public_uuid>/people/<int:person_id>")
-@require_public_user
-def public_person(user, person_id):
+@app.get("/public/{public_uuid}/people/{person_id}")
+async def public_person(public_uuid: str, person_id: int):
+    user = get_user_by_public_uuid(public_uuid)
+    if not user:
+        return not_found_page()
     person = get_person_for_public(user["public_uuid"], person_id)
     if not person:
-        abort(404)
+        return not_found_page()
 
     qr_uri = qr_data_uri(person)
 
@@ -1132,16 +1146,19 @@ def public_person(user, person_id):
     return render_page("Public person page", body)
 
 
-@app.post("/public/<public_uuid>/people/<int:person_id>/adjust")
-@require_public_user
-def adjust_person_public(user, person_id):
+@app.post("/public/{public_uuid}/people/{person_id}/adjust")
+async def adjust_person_public(public_uuid: str, person_id: int, request: Request):
+    user = get_user_by_public_uuid(public_uuid)
+    if not user:
+        return not_found_page()
     person = get_person_for_public(user["public_uuid"], person_id)
     if not person:
-        abort(404)
+        return not_found_page()
 
-    action = (request.form.get("action") or "").strip().lower()
+    form = await request.form()
+    action = (form.get("action") or "").strip().lower()
     try:
-        amount_cents = parse_amount_to_cents(request.form.get("amount"))
+        amount_cents = parse_amount_to_cents(form.get("amount"))
     except ValueError as exc:
         return render_message_page(
             "Invalid amount",
@@ -1157,7 +1174,7 @@ def adjust_person_public(user, person_id):
             (delta, person_id),
         )
 
-    return redirect(url_for("public_person", public_uuid=user["public_uuid"], person_id=person_id))
+    return RedirectResponse(f"/public/{user['public_uuid']}/people/{person_id}", status_code=303)
 
 
 def render_message_page(title: str, message: str, back_href: str, is_error: bool = False):
@@ -1179,14 +1196,18 @@ def render_message_page(title: str, message: str, back_href: str, is_error: bool
         back_href=back_href,
         is_error=is_error,
     )
-    return render_page(title, body), (400 if is_error else 200)
+    return render_page(title, body, status_code=(400 if is_error else 200))
 
 
 if __name__ == "__main__":
     init_db()
     host = os.environ.get("APP_HOST", "0.0.0.0")
     port = int(os.environ.get("APP_PORT", "8000"))
-    debug = os.environ.get("APP_DEBUG", "").strip() == "1"
     print(f"Starting UUID Balance App on http://{host}:{port}")
     print(f"SQLite database: {DB_PATH}")
-    app.run(host=host, port=port, debug=debug)
+    uvicorn.run("balansivo:app", host=host, port=port, reload=False)
+
+
+@app.on_event("startup")
+async def _startup():
+    init_db()

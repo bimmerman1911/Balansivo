@@ -1,6 +1,6 @@
 # Balansivo
 
-Balansivo is a mobile-friendly Flask web app for tracking personal balances using UUID-only access.
+Balansivo is a mobile-friendly FastAPI web app for tracking personal balances using UUID-only access.
 
 Instead of usernames and passwords, each account gets two UUIDs:
 
@@ -30,28 +30,35 @@ The owner can add people, manage balances, and upload a **Swish** QR code image.
 ## Tech stack
 
 - **Python**
-- **Flask**
+- **FastAPI** (application framework)
+- **Uvicorn** (separate ASGI web server)
 - **SQLite**
 
 ## Files
 
-- `uuid_balance_app.py` — the full application
+- `balansivo.py` — the full application
 - `uuid_balance_app.db` — SQLite database, created automatically on first run
 
 ## Installation
 
-Install Flask:
+Install dependencies:
 
 ```bash
-pip install flask
+pip install fastapi uvicorn jinja2 python-multipart
 ```
 
 ## Running the app
 
-Start the server:
+### Option 1: run with Python (starts Uvicorn)
 
 ```bash
 python balansivo.py
+```
+
+### Option 2: run Uvicorn directly
+
+```bash
+uvicorn balansivo:app --host 0.0.0.0 --port 8000
 ```
 
 By default, the app runs on:
@@ -59,54 +66,6 @@ By default, the app runs on:
 ```text
 http://127.0.0.1:8000
 ```
-
-Then open that address in your browser.
-
-## How it works
-
-### 1. Create a user
-On the home page, create a new user. Balansivo generates:
-
-- a **private UUID** for the owner
-- a **public UUID** for guests
-
-### 2. Owner access
-Using the private UUID, the owner can:
-
-- open the private dashboard
-- add people by first and last name
-- add or subtract amounts from balances
-- upload a Swish QR image
-
-### 3. Guest access
-Using the public UUID, guests can:
-
-- see the list of people as **initials only**
-- open their person page
-- view the balance
-- add or subtract an amount
-
-### 4. Direct UUID access
-If someone visits:
-
-```text
-/UUID
-```
-
-Balansivo checks whether the UUID is private or public and sends the visitor to the correct page automatically.
-
-## Balance logic
-
-- **Positive balance**: the person owes the owner money
-- **Negative balance**: the owner owes the person money
-
-## Image upload
-
-The owner can upload an image intended to be a **Swish QR code**.
-
-- Supported formats: PNG, JPG, WEBP, GIF
-- Max size: 4 MB
-- Displayed on all public person pages under the title **Swish**
 
 ## Database persistence
 
@@ -136,13 +95,7 @@ Treat the private UUID like a secret link. Anyone who gets it can control the pr
 You can change the host or port with environment variables:
 
 ```bash
-APP_HOST=0.0.0.0 APP_PORT=8000 python uuid_balance_app.py
-```
-
-You can also enable Flask debug mode:
-
-```bash
-APP_DEBUG=1 python uuid_balance_app.py
+APP_HOST=0.0.0.0 APP_PORT=8000 python balansivo.py
 ```
 
 ## License
