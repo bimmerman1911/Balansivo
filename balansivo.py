@@ -223,6 +223,35 @@ BASE_HTML = """
       margin: 0 auto;
       padding: 18px 0 42px;
     }
+    .site-header {
+      margin-bottom: 16px;
+    }
+    .site-brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      width: fit-content;
+      padding: 8px 10px;
+      border-radius: 16px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .site-brand .brand-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+    }
+    .site-brand .brand-icon::after {
+      font-size: 1.5rem;
+    }
+    .site-brand .brand-title {
+      font-size: 1.2rem;
+      line-height: 1;
+    }
+    .site-brand .brand-mark {
+      width: 96px;
+      height: 4px;
+    }
     .hero {
       display: grid;
       gap: 18px;
@@ -532,6 +561,15 @@ BASE_HTML = """
 </head>
 <body>
   <div class="page">
+    <header class="site-header">
+      <a class="site-brand" href="/" aria-label="Balansivo home">
+        <div class="brand-icon"></div>
+        <div class="brand-name">
+          <p class="brand-title">Balansivo</p>
+          <div class="brand-mark"></div>
+        </div>
+      </a>
+    </header>
     {{ body|safe }}
   </div>
   <script>
@@ -596,13 +634,6 @@ def too_large(_):
 def home():
     body = """
     <section class="hero">
-      <div class="brand" aria-label="Balansivo logo">
-        <div class="brand-icon"></div>
-        <div class="brand-name">
-          <p class="brand-title">Balansivo</p>
-          <div class="brand-mark"></div>
-        </div>
-      </div>
       <h1>Track balances with UUID-only access.</h1>
       <p class="sub">Create an account, receive one private UUID and one public UUID, then manage people and balances with no password at all. Anyone with the public UUID can open your profile and adjust their own balance. A Swish QR image can be shown on every public person page.</p>
     </section>
