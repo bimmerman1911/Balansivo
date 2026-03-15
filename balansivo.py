@@ -461,12 +461,6 @@ BASE_HTML = """
       color: var(--muted);
       line-height: 1.6;
     }
-    .footer-note {
-      margin-top: 26px;
-      color: var(--muted);
-      text-align: center;
-      font-size: 0.9rem;
-    }
     @media (max-width: 860px) {
       .grid-2, .grid-3 { grid-template-columns: 1fr; }
       .page { width: min(760px, calc(100vw - 18px)); }
@@ -483,7 +477,6 @@ BASE_HTML = """
 <body>
   <div class="page">
     {{ body|safe }}
-    <div class="footer-note">UUID-only demo app built with Flask + SQLite. The SQLite file stays on disk, so data survives restarts.</div>
   </div>
   <script>
     function showTab(id) {
@@ -581,7 +574,6 @@ def home():
               <li>Public UUID opens the guest-facing profile.</li>
               <li>Owners see full names. Guests only see initials.</li>
               <li>Balances can be increased or decreased from both sides.</li>
-              <li>The SQLite database persists across restarts.</li>
             </ul>
           </div>
         </div>
