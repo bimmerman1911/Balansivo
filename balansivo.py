@@ -228,6 +228,62 @@ BASE_HTML = """
       gap: 18px;
       padding: 18px 0 8px;
     }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      width: fit-content;
+    }
+    .brand-icon {
+      width: 62px;
+      height: 62px;
+      border-radius: 18px;
+      position: relative;
+      background: linear-gradient(150deg, #173158, #091325);
+      border: 1px solid rgba(114, 179, 255, 0.35);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.15),
+        0 12px 24px rgba(0,0,0,0.4);
+      overflow: hidden;
+    }
+    .brand-icon::before {
+      content: "";
+      position: absolute;
+      width: 72%;
+      height: 20%;
+      top: 0;
+      left: 0;
+      border-bottom-right-radius: 20px;
+      background: linear-gradient(90deg, rgba(180, 225, 255, 0.45), rgba(180,225,255,0.12));
+    }
+    .brand-icon::after {
+      content: "B";
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      font-size: 2.7rem;
+      font-weight: 900;
+      color: #75c6ff;
+      text-shadow: 0 0 12px rgba(117,198,255,0.25);
+    }
+    .brand-name {
+      display: grid;
+      gap: 6px;
+    }
+    .brand-title {
+      margin: 0;
+      font-size: clamp(1.8rem, 4.3vw, 3rem);
+      letter-spacing: -0.04em;
+      font-weight: 800;
+      line-height: 0.95;
+    }
+    .brand-mark {
+      width: min(240px, 52vw);
+      height: 6px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #69c2ff 0%, #69c2ff 88%, transparent 88%);
+    }
     .badge {
       display: inline-flex;
       align-items: center;
@@ -540,7 +596,13 @@ def too_large(_):
 def home():
     body = """
     <section class="hero">
-      <span class="badge">2026-style mobile web app</span>
+      <div class="brand" aria-label="Balansivo logo">
+        <div class="brand-icon"></div>
+        <div class="brand-name">
+          <p class="brand-title">Balansivo</p>
+          <div class="brand-mark"></div>
+        </div>
+      </div>
       <h1>Track balances with UUID-only access.</h1>
       <p class="sub">Create an account, receive one private UUID and one public UUID, then manage people and balances with no password at all. Anyone with the public UUID can open your profile and adjust their own balance. A Swish QR image can be shown on every public person page.</p>
     </section>
@@ -600,7 +662,7 @@ def home():
       </div>
     </div>
     """
-    return render_page("UUID Balance App", body)
+    return render_page("Balansivo", body)
 
 
 @app.post("/open")
