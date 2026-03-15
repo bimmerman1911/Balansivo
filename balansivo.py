@@ -697,7 +697,7 @@ async def home():
         <div class="card stack-lg">
           <div>
             <h2>Security note</h2>
-            <p class="muted">This matches your requested design, but a UUID-only system should be treated like a magic link. Anyone who gets the private UUID gets full access.</p>
+            <p class="muted">A UUID-only system should be treated like a magic link. Anyone who gets the private UUID gets full access.</p>
           </div>
         </div>
       </div>
