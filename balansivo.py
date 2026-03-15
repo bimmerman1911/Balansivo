@@ -17,12 +17,13 @@ except ModuleNotFoundError as exc:
         "This app requires FastAPI + Uvicorn. Install with: pip install fastapi uvicorn jinja2 python-multipart"
     ) from exc
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "uuid_balance_app.db")
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.abspath(os.environ.get("BALANSIVO_DATA_DIR", os.getcwd()))
+DB_PATH = os.path.join(DATA_DIR, "uuid_balance_app.db")
 MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 ALLOWED_MIME = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 
-app = FastAPI()
+app = FastAPI(root_path=os.environ.get("APP_ROOT_PATH", ""))
 
 
 def get_conn():
@@ -33,6 +34,7 @@ def get_conn():
 
 
 def init_db():
+    os.makedirs(DATA_DIR, exist_ok=True)
     with get_conn() as conn:
         conn.executescript(
             """
@@ -1203,9 +1205,12 @@ if __name__ == "__main__":
     init_db()
     host = os.environ.get("APP_HOST", "0.0.0.0")
     port = int(os.environ.get("APP_PORT", "8000"))
+    root_path = os.environ.get("APP_ROOT_PATH", "")
     print(f"Starting UUID Balance App on http://{host}:{port}")
+    print(f"Script directory: {SCRIPT_DIR}")
+    print(f"Data directory: {DATA_DIR}")
     print(f"SQLite database: {DB_PATH}")
-    uvicorn.run("balansivo:app", host=host, port=port, reload=False)
+    uvicorn.run(app, host=host, port=port, reload=False, root_path=root_path)
 
 
 @app.on_event("startup")

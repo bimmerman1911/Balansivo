@@ -71,10 +71,18 @@ http://127.0.0.1:8000
 
 Balansivo uses SQLite for storage.
 
-The database file is stored next to the Python script as:
+The database file is stored in the current working directory by default as:
 
 ```text
 uuid_balance_app.db
+```
+
+This makes it easy to drop `balansivo.py` into any webserver folder and run it there.
+
+You can also choose a specific data folder with:
+
+```bash
+BALANSIVO_DATA_DIR=/path/to/data python balansivo.py
 ```
 
 Because the database is stored on disk, data remains available after the script is stopped and started again.
@@ -92,11 +100,15 @@ Treat the private UUID like a secret link. Anyone who gets it can control the pr
 
 ## Optional environment variables
 
-You can change the host or port with environment variables:
+You can change runtime behavior with environment variables:
 
 ```bash
-APP_HOST=0.0.0.0 APP_PORT=8000 python balansivo.py
+APP_HOST=0.0.0.0 APP_PORT=8000 APP_ROOT_PATH=/myapp BALANSIVO_DATA_DIR=/path/to/data python balansivo.py
 ```
+
+- `APP_HOST` and `APP_PORT` control bind address and port
+- `APP_ROOT_PATH` lets the app work behind a reverse proxy subpath (for example `/myapp`)
+- `BALANSIVO_DATA_DIR` controls where the SQLite file is stored
 
 ## License
 
