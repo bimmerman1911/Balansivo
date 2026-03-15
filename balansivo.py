@@ -96,6 +96,20 @@ def initials(first_name: str, last_name: str) -> str:
     return (first + last) or "?"
 
 
+def mask_name_part(name: str) -> str:
+    cleaned = (name or "").strip()
+    if len(cleaned) <= 2:
+        return cleaned
+    return cleaned[:2] + ("*" * (len(cleaned) - 2))
+
+
+def masked_name(first_name: str, last_name: str) -> str:
+    first = mask_name_part(first_name)
+    last = mask_name_part(last_name)
+    combined = f"{first} {last}".strip()
+    return combined or "?"
+
+
 def qr_data_uri(user_row) -> str | None:
     if not user_row["qr_image"] or not user_row["qr_mime"]:
         return None
@@ -661,7 +675,7 @@ async def home():
             <ul class="helper-list">
               <li>Private UUID opens the owner dashboard.</li>
               <li>Public UUID opens the guest-facing profile.</li>
-              <li>Owners see full names. Guests only see initials.</li>
+              <li>Owners see full names. Guests only see masked names.</li>
               <li>Balances can be increased or decreased from both sides.</li>
             </ul>
           </div>
@@ -1035,8 +1049,8 @@ async def public_profile(public_uuid: str):
         """
         <section class="hero">
           <span class="badge">Public page</span>
-          <h1>Choose your initials.</h1>
-          <p class="sub">Only initials are shown here. Open your entry to view the balance and adjust it.</p>
+          <h1>Choose your name.</h1>
+          <p class="sub">Names are masked for privacy. Open your entry to view the balance and adjust it.</p>
         </section>
 
         <div class="card stack-lg">
@@ -1055,7 +1069,7 @@ async def public_profile(public_uuid: str):
                   <div class="avatar">{{ initials(person['first_name'], person['last_name']) }}</div>
                   <div>
                     <div class="metric zero">
-                      {{ initials(person['first_name'], person['last_name']) }}
+                      {{ masked_name(person['first_name'], person['last_name']) }}
                     </div>
                     <div class="tiny">Tap to open this balance page</div>
                   </div>
@@ -1070,6 +1084,7 @@ async def public_profile(public_uuid: str):
         user=user,
         people=people,
         initials=initials,
+        masked_name=masked_name,
         format_currency=format_currency,
     )
     return render_page("Public profile", body)
@@ -1090,7 +1105,7 @@ async def public_person(public_uuid: str, person_id: int):
         """
         <section class="hero">
           <span class="badge">Public balance page</span>
-          <h1>{{ initials(person['first_name'], person['last_name']) }}</h1>
+          <h1>{{ masked_name(person['first_name'], person['last_name']) }}</h1>
           <p class="sub">Adjust this balance using the buttons below. Positive means this person owes the owner. Negative means the owner owes this person.</p>
         </section>
 
@@ -1120,7 +1135,7 @@ async def public_person(public_uuid: str, person_id: int):
             </form>
 
             <div class="actions">
-              <a class="button ghost" href="/public/{{ user.public_uuid }}">Back to initials</a>
+              <a class="button ghost" href="/public/{{ user.public_uuid }}">Back to names</a>
             </div>
           </div>
 
@@ -1143,6 +1158,7 @@ async def public_person(public_uuid: str, person_id: int):
         person=person,
         qr_uri=qr_uri,
         initials=initials,
+        masked_name=masked_name,
         format_currency=format_currency,
     )
     return render_page("Public person page", body)
