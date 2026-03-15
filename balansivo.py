@@ -552,6 +552,35 @@ BASE_HTML = """
       color: var(--muted);
       line-height: 1.6;
     }
+    .bulk-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+    }
+    .pick-card {
+      display: block;
+      cursor: pointer;
+    }
+    .pick-card input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .pick-card-body {
+      display: grid;
+      gap: 8px;
+      min-height: 92px;
+      padding: 12px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.04);
+      transition: border-color .16s ease, background .16s ease, transform .16s ease;
+    }
+    .pick-card input:checked + .pick-card-body {
+      border-color: rgba(110,231,249,0.86);
+      background: rgba(110,231,249,0.12);
+      transform: translateY(-1px);
+    }
     @media (max-width: 860px) {
       .grid-2, .grid-3 { grid-template-columns: 1fr; }
       .page { width: min(760px, calc(100vw - 18px)); }
@@ -882,6 +911,40 @@ async def private_dashboard(private_uuid: str, request: Request):
           </div>
 
           {% if people %}
+            <div class="message info">
+              <strong>Quick multi-add / subtract</strong><br>
+              Set one amount, tap the people that should receive it, then submit once.
+            </div>
+            <form class="stack" method="post" action="/private/{{ user.private_uuid }}/people/bulk-adjust">
+              <div class="bulk-grid">
+                {% for person in people %}
+                  <label class="pick-card">
+                    <input type="checkbox" name="person_ids" value="{{ person['id'] }}">
+                    <span class="pick-card-body">
+                      <span><strong>{{ person['first_name'] }} {{ person['last_name'] }}</strong></span>
+                      <span class="tiny">Current: {{ format_currency(person['balance_cents']) }}</span>
+                    </span>
+                  </label>
+                {% endfor %}
+              </div>
+              <div class="grid grid-2">
+                <label>
+                  Amount
+                  <input name="amount" inputmode="decimal" placeholder="100" required>
+                </label>
+                <label>
+                  Operation
+                  <select name="action">
+                    <option value="add">Add amount</option>
+                    <option value="subtract">Subtract amount</option>
+                  </select>
+                </label>
+              </div>
+              <div class="actions">
+                <button type="submit">Apply to selected people</button>
+              </div>
+            </form>
+
             <div class="person-grid">
               {% for person in people %}
                 <div class="person-card">
@@ -988,6 +1051,67 @@ async def adjust_person_private(private_uuid: str, person_id: int, request: Requ
         conn.execute(
             "UPDATE people SET balance_cents = balance_cents + ? WHERE id = ?",
             (delta, person_id),
+        )
+
+    return RedirectResponse(f"/private/{user['private_uuid']}", status_code=303)
+
+
+@app.post("/private/{private_uuid}/people/bulk-adjust")
+async def adjust_people_bulk_private(private_uuid: str, request: Request):
+    user = get_user_by_private_uuid(private_uuid)
+    if not user:
+        return not_found_page()
+
+    form = await request.form()
+    action = (form.get("action") or "").strip().lower()
+    if action not in {"add", "subtract"}:
+        return render_message_page(
+            "Invalid action",
+            "Choose add or subtract before submitting.",
+            f"/private/{user['private_uuid']}",
+            is_error=True,
+        )
+
+    try:
+        amount_cents = parse_amount_to_cents(form.get("amount"))
+    except ValueError as exc:
+        return render_message_page(
+            "Invalid amount",
+            str(exc),
+            f"/private/{user['private_uuid']}",
+            is_error=True,
+        )
+
+    selected_raw = form.getlist("person_ids")
+    try:
+        selected_ids = sorted({int(item) for item in selected_raw})
+    except (TypeError, ValueError):
+        return render_message_page(
+            "Invalid people selection",
+            "Selected people list was not valid.",
+            f"/private/{user['private_uuid']}",
+            is_error=True,
+        )
+    if not selected_ids:
+        return render_message_page(
+            "No people selected",
+            "Tap one or more people before applying an amount.",
+            f"/private/{user['private_uuid']}",
+            is_error=True,
+        )
+
+    with get_conn() as conn:
+        marks = ",".join("?" for _ in selected_ids)
+        rows = conn.execute(
+            f"SELECT id FROM people WHERE user_id = ? AND id IN ({marks})",
+            (user["id"], *selected_ids),
+        ).fetchall()
+        allowed_ids = {row["id"] for row in rows}
+
+        delta = amount_cents if action == "add" else -amount_cents
+        conn.executemany(
+            "UPDATE people SET balance_cents = balance_cents + ? WHERE id = ?",
+            [(delta, person_id) for person_id in selected_ids if person_id in allowed_ids],
         )
 
     return RedirectResponse(f"/private/{user['private_uuid']}", status_code=303)
